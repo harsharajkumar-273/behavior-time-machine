@@ -1,0 +1,12 @@
+{
+  "version": "v1",
+  "hooks": [{
+    "name": "Verify BASIC parity after fee changes",
+    "trigger": "PostFileSave",
+    "matcher": "(^|/)backend/fees\\.py$",
+    "action": {
+      "type": "command",
+      "command": ".venv/bin/python -m pytest -q tests/test_behavior.py -k 'corrected_sweep or fee_at_4_days'"
+    }
+  }]
+}

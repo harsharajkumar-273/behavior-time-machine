@@ -1,0 +1,28 @@
+name: Migration parity
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix frontend
+      - run: npm run build --prefix frontend
+      - run: docker build -t behavior-time-machine .
+      - name: Verify the production container
+        run: |
+          docker run -d --rm --name behavior-time-machine -p 8080:8080 behavior-time-machine
+          curl -fsS --retry 10 --retry-connrefused http://127.0.0.1:8080/ | grep 'Behavior Time Machine'
+          curl -fsS -H 'Content-Type: application/json' -d '{"portVersion":"corrected"}' http://127.0.0.1:8080/api/sweep |
+            python -c 'import json,sys; assert json.load(sys.stdin) == {"checkedCount": 366, "mismatchCount": 0, "firstMismatch": None}'
+      - if: always()
+        run: docker rm -f behavior-time-machine || true
