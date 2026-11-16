@@ -21,7 +21,7 @@ jobs:
       - name: Verify the production container
         run: |
           docker run -d --rm --name behavior-time-machine -p 8080:8080 behavior-time-machine
-          curl -fsS --retry 10 --retry-connrefused http://127.0.0.1:8080/ | grep 'Behavior Time Machine'
+          curl -fsS --retry 10 --retry-all-errors http://127.0.0.1:8080/ | grep 'Behavior Time Machine'
           curl -fsS -H 'Content-Type: application/json' -d '{"portVersion":"corrected"}' http://127.0.0.1:8080/api/sweep |
             python -c 'import json,sys; assert json.load(sys.stdin) == {"checkedCount": 366, "mismatchCount": 0, "firstMismatch": None}'
       - if: always()
