@@ -24,3 +24,10 @@
 - The parser shall reject missing, extra, blank, fractional, or non-integer output lines.
 - The transit initial port shall differ exactly at age 65 over 0–100. The corrected port shall match all 101 inputs.
 - Each run report shall include the manifest, source and driver hashes, checked range, checked count, all observed comparisons, and every mismatch. Downloaded reports shall preserve these fields.
+
+## 5. Inspect and reproduce evidence
+
+- A completed sweep shall show a filterable, paginated results table and a range overview derived from actual comparisons.
+- Inspecting a row shall update the displayed outputs and available regression evidence without discarding the completed sweep.
+- A local replay command shall rerun a downloaded report against the registered case and compare its recorded evidence and source hashes.
+- Invalid report ranges shall fail before interpreter execution. A changed recorded output or hash shall cause reproduction to fail.

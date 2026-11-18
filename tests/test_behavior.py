@@ -149,3 +149,26 @@ def test_compare_and_sweep_use_same_batch_execution(monkeypatch):
     assert len(calls) == 2
     assert one["legacyCents"] == many["firstMismatch"]["legacyCents"]
     assert one["report"]["range"] == {"minimum": 65, "maximum": 65}
+
+
+def test_replay_reproduces_report_and_detects_edits():
+    import copy
+    from backend.replay import replay_report
+    report = client.post("/api/compare", json={"caseId": "transit", "input": 65, "portVersion": "flawed"}).json()["report"]
+    assert replay_report(report) == []
+    changed_hash = copy.deepcopy(report)
+    changed_hash["sourceHashes"]["basic"] = "0" * 64
+    assert "sourceHashes" in replay_report(changed_hash)
+    changed_output = copy.deepcopy(report)
+    changed_output["comparisons"][0]["legacyCents"] = 200
+    assert "comparisons" in replay_report(changed_output)
+
+
+def test_replay_rejects_invalid_domain_before_execution(monkeypatch):
+    from backend.replay import replay_report
+    from pydantic import ValidationError
+    report = client.post("/api/compare", json={"caseId": "transit", "input": 65, "portVersion": "flawed"}).json()["report"]
+    report["range"] = {"minimum": 0, "maximum": 100000}
+    monkeypatch.setattr("backend.replay.run_case", lambda *args: pytest.fail("Invalid report must not execute"))
+    with pytest.raises(ValidationError):
+        replay_report(report)

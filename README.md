@@ -51,3 +51,15 @@ Python ports expose the named function with arguments `(input_value, port_versio
 Download a JSON report after either action. It records the manifest, selected version, range, timestamp, runtime version, SHA-256 hashes of both source files and the generated driver, every observed comparison, and the full mismatch list. These hashes support reproduction and comparison against source files. Reports remain editable. Each result verifies equality only within its declared domain.
 
 The two BASIC fixtures are original fictional demonstrations. Architectural changes in this version were implemented in Codex. A genuine Kiro session and recording remain required for an accurate Kiro contribution write-up.
+
+## Inspect and reproduce a run
+
+After a sweep, use the range overview and results table to inspect any recorded input. “Differences only” filters the table, and pagination keeps large domains usable. Inspecting a row retains the original sweep and report. The corrected variant reruns the full domain.
+
+Save a downloaded report into the project root and rerun it locally.
+
+```sh
+.venv/bin/python -m backend.replay transit-flawed-report.json
+```
+
+The replay command uses the locally registered case and executes the original range again. It compares the manifest, BASIC/port/driver hashes, runtime, counts, every comparison, and every mismatch. Timestamps can differ. Exit code 0 means all recorded evidence was reproduced, 1 means it differs, and 2 means validation or execution failed. The command does not execute source paths from a downloaded report.

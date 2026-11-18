@@ -59,6 +59,55 @@ function Evidence({ result, migration }) {
   </section>;
 }
 
+function SweepExplorer({ report, migration, selectedInput, onSelect, disabled }) {
+  const [onlyDifferences, setOnlyDifferences] = useState(true);
+  const [page, setPage] = useState(0);
+  const rows = onlyDifferences ? report.mismatches : report.comparisons;
+  const pageSize = 20;
+  const visible = rows.slice(page * pageSize, (page + 1) * pageSize);
+  const segments = [];
+  for (const row of report.comparisons) {
+    const previous = segments[segments.length - 1];
+    if (previous && previous.matches === row.matches) {
+      previous.maximum = row.input;
+      previous.count += 1;
+    } else {
+      segments.push({ minimum: row.input, maximum: row.input, matches: row.matches, count: 1 });
+    }
+  }
+
+  return <section className="sweep-explorer" aria-labelledby="sweep-title">
+    <div className="evidence-header">
+      <div><h2 id="sweep-title">Explore the checked range</h2>
+        <p>Choose an input to inspect its recorded outputs.</p></div>
+      <label className="difference-filter"><input type="checkbox" checked={onlyDifferences}
+        onChange={event => { setOnlyDifferences(event.target.checked); setPage(0); }} /> Differences only</label>
+    </div>
+    <div className="range-strip" aria-hidden="true">
+      {segments.map(segment => <span key={segment.minimum} className={segment.matches ? 'range-match' : 'range-mismatch'}
+        style={{ flexGrow: segment.count }}
+        title={segment.minimum + '–' + segment.maximum + (segment.matches ? ' agree' : ' differ')} />)}
+    </div>
+    <div className="range-caption"><span>{report.range.minimum}</span><span>Green agrees · Amber differs</span><span>{report.range.maximum}</span></div>
+    {rows.length === 0 ? <p className="empty-results">Every checked input agrees. Clear “Differences only” to inspect the results.</p> :
+      <div className="results-table"><table>
+        <thead><tr><th scope="col">{migration.inputLabel}</th><th scope="col">Legacy</th><th scope="col">Port</th><th scope="col">Result</th></tr></thead>
+        <tbody>{visible.map(row => <tr key={row.input} className={selectedInput === row.input ? 'selected-row' : ''}>
+          <th scope="row"><button type="button" className="link-button" disabled={disabled}
+            aria-pressed={selectedInput === row.input} onClick={() => onSelect(row.input)}>Inspect {row.input}</button></th>
+          <td>{formatFee(row.legacyCents, migration.outputUnit)}</td>
+          <td>{formatFee(row.modernCents, migration.outputUnit)}</td>
+          <td>{row.matches ? 'Agrees' : 'Differs'}</td>
+        </tr>)}</tbody>
+      </table></div>}
+    {rows.length > pageSize && <div className="pagination">
+      <button type="button" className="outline" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</button>
+      <span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, rows.length)} of {rows.length}</span>
+      <button type="button" className="outline" disabled={(page + 1) * pageSize >= rows.length} onClick={() => setPage(page + 1)}>Next</button>
+    </div>}
+  </section>;
+}
+
 function App() {
   const [cases, setCases] = useState([]);
   const [caseId, setCaseId] = useState('library');
@@ -77,11 +126,13 @@ function App() {
   const [error, setError] = useState('');
   const [lastMode, setLastMode] = useState(null);
   const [reference, setReference] = useState(null);
+  const [selectedInput, setSelectedInput] = useState(null);
 
   async function run(mode, selectedVersion = version, input = days) {
     setPending(mode);
     setError('');
     setResult(null);
+    setSelectedInput(null);
     try {
       const data = await requestRun(mode, selectedVersion, Number(input), caseId);
       setResult({ mode, data });
@@ -109,9 +160,10 @@ function App() {
   }
 
   const sweep = result?.mode === 'sweep' ? result.data : null;
-  const comparison = result?.mode === 'compare' ? result.data : sweep?.firstMismatch;
+  const comparison = result?.mode === 'compare' ? result.data :
+    sweep?.comparisons.find(row => row.input === selectedInput) ?? sweep?.firstMismatch;
   const mismatch = comparison && !comparison.matches;
-  const parity = result && !mismatch;
+  const parity = result && (sweep ? sweep.mismatchCount === 0 : comparison?.matches);
   const displayedDays = comparison?.daysOverdue ?? days;
 
   function changeCase(nextId) {
@@ -119,6 +171,7 @@ function App() {
     setDays(String(cases.find(item => item.id === nextId).minimum));
     setResult(null);
     setReference(null);
+    setSelectedInput(null);
     setLastMode(null);
     setError('');
   }
@@ -185,7 +238,7 @@ function App() {
           <article className="legacy">
             <header><span className="terminal-icon" aria-hidden="true">›_</span><h3>Legacy terminal</h3><span className="runtime-label">GW-BASIC</span></header>
             <div className="pane-body">
-              <div className="terminal-prompt">&gt; {comparison ? 'INPUT ' + displayedDays : 'RUN OVERDUE.BAS'}</div>
+              <div className="terminal-prompt">&gt; {comparison ? 'INPUT ' + displayedDays : 'RUN ' + (migration?.basicFile.toUpperCase() ?? 'PROGRAM')}</div>
               <div className="fee">{comparison ? formatFee(comparison.legacyCents, migration.outputUnit) : '—'}</div>
               <div className="terminal-detail">{comparison ? comparison.legacyOutput + ' ' + migration.outputUnit : 'Awaiting input'}</div>
             </div>
@@ -201,19 +254,27 @@ function App() {
         </div>
         <div aria-live="polite">
           {mismatch && <div className="callout mismatch">
-            <strong>{sweep ? 'First mismatch at ' + migration.inputUnit + ' ' + displayedDays : 'Mismatch at ' + migration.inputUnit + ' ' + displayedDays}</strong>
+            <strong>{sweep && selectedInput === null ? 'First mismatch at ' + migration.inputUnit + ' ' + displayedDays : 'Mismatch at ' + migration.inputUnit + ' ' + displayedDays}</strong>
             <span>{sweep ? sweep.mismatchCount + (sweep.mismatchCount === 1 ? ' difference across ' : ' differences across ') + sweep.checkedCount + ' inputs.' : 'The port and the running legacy program returned different values.'}</span>
+          </div>}
+          {sweep && !mismatch && !parity && <div className="callout mismatch">
+            <strong>{sweep.mismatchCount} differences across {sweep.checkedCount} inputs</strong>
+            <span>The selected input agrees. Other inputs still differ.</span>
           </div>}
           {parity && <div className="callout match">
             <strong>{sweep ? 'Parity verified across all ' + sweep.checkedCount + ' inputs' : 'Both programs agree at ' + migration.inputUnit + ' ' + displayedDays}</strong>
             {sweep && reference !== null && <button type="button" className="link-button" onClick={() => { setDays(String(reference)); void run('compare', version, String(reference)); }}>Replay {migration?.inputUnit} {reference} →</button>}
           </div>}
         </div>
+        {sweep && <SweepExplorer key={sweep.generatedAt} report={sweep} migration={migration}
+          selectedInput={comparison?.input} disabled={Boolean(pending)}
+          onSelect={value => { setSelectedInput(value); setDays(String(value)); }} />}
         {comparison && <details className="policy" open={Boolean(mismatch)}><summary>Legacy policy lines</summary>
           <pre>{comparison.policyLines.join('\n')}</pre>
         </details>}
         {mismatch && <Evidence key={caseId + comparison.daysOverdue} result={comparison} migration={migration} />}
-        {result && <div className="report-download"><button type="button" className="outline" onClick={downloadReport}>Download run report ↓</button><p>Includes the manifest, source hashes, checked range, actual outputs, and every mismatch.</p></div>}
+        {result && <div className="report-download"><button type="button" className="outline" onClick={downloadReport}>Download run report ↓</button><p>Includes source hashes and every observed result. Replay it locally with the command below.</p></div>}
+        {result && <div className="replay-command"><code>.venv/bin/python -m backend.replay {caseId}-{version}-report.json</code></div>}
       </section>
       <section className="how" id="how-it-works">
         <h2>How it works</h2>
