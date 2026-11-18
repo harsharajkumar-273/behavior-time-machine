@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-const formatFee = (cents) => money.format(cents / 100);
+const formatFee = (value, unit = 'cents') => unit === 'cents' ? money.format(value / 100) : String(value);
 
 async function requestRun(mode, portVersion, daysOverdue, caseId) {
   const response = await fetch('/api/' + mode, {
@@ -22,11 +22,11 @@ function Evidence({ result, migration }) {
   const [artifact, setArtifact] = useState('criterion');
   const [copyStatus, setCopyStatus] = useState('');
   const days = result.daysOverdue;
-  const criterion = 'Given ' + migration.inputLabel.toLowerCase() + ' ' + days + ', the migrated calculator shall return ' + formatFee(result.legacyCents) + ' to preserve the observed library policy.';
+  const criterion = 'Given ' + migration.inputLabel.toLowerCase() + ' ' + days + ', the migrated calculator shall return ' + formatFee(result.legacyCents, migration.outputUnit) + ' to preserve the observed legacy behavior.';
   const regression = [
     'from backend.' + migration.portFile.replace('.py', '') + ' import ' + migration.portFunction,
     '',
-    'def test_fee_at_' + days + '_days():',
+    'def test_' + migration.id.replaceAll('-', '_') + '_at_' + String(days).replace('-', 'minus_') + '():',
     '    assert ' + migration.portFunction + '(' + days + ', "corrected") == ' + result.legacyCents,
   ].join('\n');
   const content = artifact === 'criterion' ? criterion : regression;
@@ -186,15 +186,15 @@ function App() {
             <header><span className="terminal-icon" aria-hidden="true">›_</span><h3>Legacy terminal</h3><span className="runtime-label">GW-BASIC</span></header>
             <div className="pane-body">
               <div className="terminal-prompt">&gt; {comparison ? 'INPUT ' + displayedDays : 'RUN OVERDUE.BAS'}</div>
-              <div className="fee">{comparison ? formatFee(comparison.legacyCents) : '—'}</div>
-              <div className="terminal-detail">{comparison ? comparison.legacyOutput + ' cents' : 'Awaiting input'}</div>
+              <div className="fee">{comparison ? formatFee(comparison.legacyCents, migration.outputUnit) : '—'}</div>
+              <div className="terminal-detail">{comparison ? comparison.legacyOutput + ' ' + migration.outputUnit : 'Awaiting input'}</div>
             </div>
           </article>
           <article className="modern">
             <header><span className="modern-icon" aria-hidden="true">⌘</span><h3>Modern calculator</h3><span className="runtime-label">PYTHON</span></header>
             <div className="pane-body">
               <div className="modern-label">Calculated fee</div>
-              <div className="fee">{comparison ? formatFee(comparison.modernCents) : '—'}</div>
+              <div className="fee">{comparison ? formatFee(comparison.modernCents, migration.outputUnit) : '—'}</div>
               <div className="modern-label">{comparison ? migration?.inputLabel + ' ' + displayedDays : 'Awaiting comparison'}</div>
             </div>
           </article>
