@@ -89,3 +89,8 @@ pre { margin: 10px 0 0; padding: 12px; color: var(--ink); background: #f6f3fa; b
   .pane-body { padding: 12px 9px; }
   .nav-link { font-size: .78rem; }
 }
+.case-select { display: flex; align-items: center; gap: 12px; margin-top: 20px; color: var(--muted); font-size: .85rem; }
+.case-select select { min-height: 40px; max-width: 100%; padding: 8px; border: 1px solid var(--edge); background: #fff; border-radius: 8px; font: inherit; color: var(--ink); }
+.report-download { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 18px; }
+.report-download p { max-width: 430px; font-size: .8rem; color: var(--muted); }
+@media (max-width: 650px) { .case-select { align-items: start; flex-direction: column; } }

@@ -1,41 +1,43 @@
+import hashlib
+import importlib
+import json
 import re
 import subprocess
 import sys
-from pathlib import Path
+from datetime import datetime, timezone
 from threading import BoundedSemaphore
 
-from .fees import MAX_DAYS
+from .contracts import ROOT, Case, ManifestError, get_case
+from .fees import PortVersion
 
-FIXTURE = Path(__file__).with_name("overdue.bas")
-POLICY_LINES = tuple(line for line in FIXTURE.read_text().splitlines() if line[:2] in {"40", "50", "60"})
 RUN_SLOTS = BoundedSemaphore(4)
-PROMPT = re.compile(r"\?\s+([0-9]+)")
-FEE_LINE = re.compile(r"(?:\?\s*)*FEE=\s*([0-9]+)\s*")
 
 
 class InterpreterError(Exception):
     pass
 
 
-def run_basic(days: list[int]) -> list[int]:
-    if not days or len(days) > MAX_DAYS + 1:
-        raise ValueError("Invalid BASIC batch size.")
-    if any(type(day) is not int or not 0 <= day <= MAX_DAYS for day in days):
-        raise ValueError("Days overdue must be whole numbers from 0 to 365.")
+def run_case(case: Case, lower: int, upper: int, version: PortVersion) -> dict:
+    if not case.minimum <= lower <= upper <= case.maximum:
+        raise ValueError("Input is outside the declared domain.")
+    basic_bytes = (ROOT / case.basicFile).read_bytes()
+    port_bytes = (ROOT / case.portFile).read_bytes()
+    source = basic_bytes.decode("ascii")
+    from .basic_worker import build_driver
+    try:
+        driver = build_driver(source, lower, upper)
+        module = importlib.import_module("backend." + case.portFile.removesuffix(".py"))
+        calculate = getattr(module, case.portFunction)
+    except (ValueError, ImportError, AttributeError) as error:
+        raise ManifestError("The case does not satisfy the scalar program contract.") from error
 
-    payload = "\n".join(map(str, [len(days), *days])) + "\n"
     if not RUN_SLOTS.acquire(blocking=False):
         raise InterpreterError("The BASIC runtime is busy. Try again in a moment.")
     try:
         process = subprocess.run(
-            [sys.executable, str(FIXTURE.with_name("basic_worker.py"))],
-            cwd=FIXTURE.parent,
-            input=payload,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=8,
-            check=False,
+            [sys.executable, str(ROOT / "basic_worker.py")],
+            input=json.dumps({"source": source, "minimum": lower, "maximum": upper}),
+            capture_output=True, text=True, encoding="utf-8", timeout=15, check=False,
         )
     except subprocess.TimeoutExpired as error:
         raise InterpreterError("PC-BASIC timed out. Try again.") from error
@@ -43,17 +45,45 @@ def run_basic(days: list[int]) -> list[int]:
         raise InterpreterError("PC-BASIC could not be started or read.") from error
     finally:
         RUN_SLOTS.release()
-
     if process.returncode:
         raise InterpreterError("PC-BASIC is unavailable or exited with an error.")
-    lines = [line.strip() for line in process.stdout.splitlines() if line.strip()]
-    prompts = [int(match[1]) for line in lines if (match := PROMPT.fullmatch(line))]
-    if prompts != [len(days), *days]:
-        raise InterpreterError("PC-BASIC returned unexpected input prompts.")
-    matches = [FEE_LINE.fullmatch(line) for line in lines if not PROMPT.fullmatch(line)]
-    if len(matches) != len(days) or any(match is None for match in matches):
-        raise InterpreterError("PC-BASIC returned unexpected output.")
-    fees = [int(match[1]) for match in matches if match]
-    if any(not 0 <= fee <= 1000 for fee in fees):
-        raise InterpreterError("PC-BASIC returned an out-of-range fee.")
-    return fees
+    lines = process.stdout.splitlines()
+    if len(lines) != upper - lower + 1 or any(re.fullmatch(r" *-?[0-9]+ *", line) is None for line in lines):
+        raise InterpreterError("PC-BASIC must return exactly one integer per input line.")
+    policy = source.splitlines()[1:-1]
+    comparisons = []
+    for value, line in zip(range(lower, upper + 1), lines, strict=True):
+        legacy = int(line)
+        modern = calculate(value, version)
+        if type(modern) is not int:
+            raise InterpreterError("The port must return an integer.")
+        comparisons.append({
+            "input": value, "daysOverdue": value,
+            "legacyCents": legacy, "modernCents": modern, "matches": legacy == modern,
+            "legacyOutput": line.strip(), "policyLines": policy,
+        })
+    mismatches = [row for row in comparisons if not row["matches"]]
+    return {
+        "schemaVersion": 2, "caseId": case.id, "portVersion": version,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "manifest": case.model_dump(), "range": {"minimum": lower, "maximum": upper},
+        "sourceHashes": {
+            "basic": hashlib.sha256(basic_bytes).hexdigest(),
+            "port": hashlib.sha256(port_bytes).hexdigest(),
+            "driver": hashlib.sha256(driver.encode("ascii")).hexdigest(),
+        },
+        "runtime": "PC-BASIC 2.0.7",
+        "checkedCount": len(comparisons), "mismatchCount": len(mismatches),
+        "firstMismatch": mismatches[0] if mismatches else None,
+        "mismatches": mismatches, "comparisons": comparisons,
+    }
+
+
+def run_basic(days: list[int]) -> list[int]:
+    """Compatibility entry point for the original library boundary checks."""
+    case = get_case("library")
+    if not days or any(type(day) is not int or not 0 <= day <= 365 for day in days):
+        raise ValueError("Days overdue must be whole numbers from 0 to 365.")
+    report = run_case(case, min(days), max(days), "corrected")
+    fees = {row["input"]: row["legacyCents"] for row in report["comparisons"]}
+    return [fees[day] for day in days]

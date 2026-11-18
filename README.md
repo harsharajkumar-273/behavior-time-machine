@@ -37,3 +37,17 @@ Create a public GitHub repository and push the project with the root `.kiro/` di
 The committed spec, steering rule, and hook are ready for Kiro IDE. The prototype was implemented in Codex. To demonstrate real Kiro work, open this project in Kiro IDE and perform a substantive migration follow-up. For example, exercise the same workflow on the fee-cap boundary with an intentionally uncapped version of the port, confirm the observed policy, have Kiro add the regression and fix the port, and save the resulting spec and test evidence. Restore the public demo to the original two variants before recording its walkthrough. Describe only the Kiro work actually performed in the Devpost write-up.
 
 A demo recording can follow the main workflow in under three minutes. Explain the migration, run the initial sweep, show the day-four evidence, show the genuine Kiro session and regression, then run the corrected sweep and replay the failing input.
+
+## Version 2 case contract
+
+The manifest in `backend/cases.json` declares the BASIC source, Python module and callable, integer bounds, parser, and display labels. It contains no expected outputs. The library case checks 366 inputs and finds 39 differences at days 4 through 42. The transit case checks 101 ages and finds one difference at 65. Both corrected ports match their entire declared domains.
+
+To add a trusted local case, add a BASIC file and Python module under `backend/`, then register them in the manifest. BASIC source must have unique increasing line numbers from 1000, begin with `INPUT X`, finish with `END`, and print exactly one integer per invocation. The intermediate policy statements must calculate from X without modifying X. Programs must be deterministic and self-contained, with no interactive input beyond the opening INPUT. The runner adapts INPUT and END to a subroutine and generates a FOR/GOSUB driver that executes the complete requested range in one PC-BASIC subprocess. Existing arbitrary BASIC programs require adaptation to this contract.
+
+Python ports expose the named function with arguments `(input_value, port_version)` and return an integer. Supported versions are `flawed` and `corrected`. The declared domain is limited to 10,000 values within -32768 through 32766. The upper limit avoids GW-BASIC's loop-counter overflow.
+
+`GET /api/cases` lists manifests. Compare accepts `{"caseId":"transit","input":65,"portVersion":"flawed"}`. Sweep accepts `{"caseId":"transit","portVersion":"corrected"}`. The original library `daysOverdue` request remains supported.
+
+Download a JSON report after either action. It records the manifest, selected version, range, timestamp, runtime version, SHA-256 hashes of both source files and the generated driver, every observed comparison, and the full mismatch list. These hashes support reproduction and comparison against source files. Reports remain editable. Each result verifies equality only within its declared domain.
+
+The two BASIC fixtures are original fictional demonstrations. Architectural changes in this version were implemented in Codex. A genuine Kiro session and recording remain required for an accurate Kiro contribution write-up.

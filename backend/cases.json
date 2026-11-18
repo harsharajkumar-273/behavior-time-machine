@@ -1,0 +1,4 @@
+[
+  {"id":"library","title":"Library fee calculator","basicFile":"overdue.bas","portFile":"fees.py","portFunction":"calculate_fee","minimum":0,"maximum":365,"parser":"integer-lines","inputLabel":"Days overdue","inputUnit":"day","outputUnit":"cents"},
+  {"id":"transit","title":"Transit fare calculator","basicFile":"transit.bas","portFile":"transit.py","portFunction":"calculate_fare","minimum":0,"maximum":100,"parser":"integer-lines","inputLabel":"Passenger age","inputUnit":"age","outputUnit":"cents"}
+]

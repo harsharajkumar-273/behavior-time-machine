@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const formatFee = (cents) => money.format(cents / 100);
 
-async function requestRun(mode, portVersion, daysOverdue) {
+async function requestRun(mode, portVersion, daysOverdue, caseId) {
   const response = await fetch('/api/' + mode, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(mode === 'compare' ? { portVersion, daysOverdue } : { portVersion }),
+    body: JSON.stringify(mode === 'compare' ? { portVersion, input: daysOverdue, caseId } : { portVersion, caseId }),
   });
   if (!response.ok) {
     const problem = await response.json().catch(() => null);
@@ -18,16 +18,16 @@ async function requestRun(mode, portVersion, daysOverdue) {
   return response.json();
 }
 
-function Evidence({ result }) {
+function Evidence({ result, migration }) {
   const [artifact, setArtifact] = useState('criterion');
   const [copyStatus, setCopyStatus] = useState('');
   const days = result.daysOverdue;
-  const criterion = 'Given a return ' + days + ' days overdue, when the fee is calculated, the migrated calculator shall charge ' + formatFee(result.legacyCents) + ' to preserve the observed library policy.';
+  const criterion = 'Given ' + migration.inputLabel.toLowerCase() + ' ' + days + ', the migrated calculator shall return ' + formatFee(result.legacyCents) + ' to preserve the observed library policy.';
   const regression = [
-    'from backend.fees import calculate_fee',
+    'from backend.' + migration.portFile.replace('.py', '') + ' import ' + migration.portFunction,
     '',
     'def test_fee_at_' + days + '_days():',
-    '    assert calculate_fee(' + days + ', "corrected") == ' + result.legacyCents,
+    '    assert ' + migration.portFunction + '(' + days + ', "corrected") == ' + result.legacyCents,
   ].join('\n');
   const content = artifact === 'criterion' ? criterion : regression;
 
@@ -60,6 +60,16 @@ function Evidence({ result }) {
 }
 
 function App() {
+  const [cases, setCases] = useState([]);
+  const [caseId, setCaseId] = useState('library');
+  const [caseError, setCaseError] = useState('');
+  useEffect(() => {
+    fetch('/api/cases').then(async response => {
+      if (!response.ok) throw new Error('Could not load migration cases.');
+      setCases(await response.json());
+    }).catch(failure => setCaseError(failure.message));
+  }, []);
+  const migration = cases.find(item => item.id === caseId);
   const [days, setDays] = useState('4');
   const [version, setVersion] = useState('flawed');
   const [result, setResult] = useState(null);
@@ -73,7 +83,7 @@ function App() {
     setError('');
     setResult(null);
     try {
-      const data = await requestRun(mode, selectedVersion, Number(input));
+      const data = await requestRun(mode, selectedVersion, Number(input), caseId);
       setResult({ mode, data });
       setLastMode(mode);
       const pair = mode === 'compare' ? data : data.firstMismatch;
@@ -90,7 +100,7 @@ function App() {
     setVersion(nextVersion);
     if (lastMode === 'sweep') {
       void run('sweep', nextVersion);
-    } else if (lastMode === 'compare' && days !== '' && Number.isInteger(Number(days)) && Number(days) >= 0 && Number(days) <= 365) {
+    } else if (lastMode === 'compare' && days !== '' && Number.isInteger(Number(days)) && Number(days) >= migration.minimum && Number(days) <= migration.maximum) {
       void run('compare', nextVersion);
     } else {
       setResult(null);
@@ -103,6 +113,25 @@ function App() {
   const mismatch = comparison && !comparison.matches;
   const parity = result && !mismatch;
   const displayedDays = comparison?.daysOverdue ?? days;
+
+  function changeCase(nextId) {
+    setCaseId(nextId);
+    setDays(String(cases.find(item => item.id === nextId).minimum));
+    setResult(null);
+    setReference(null);
+    setLastMode(null);
+    setError('');
+  }
+
+  function downloadReport() {
+    const report = result.mode === 'compare' ? result.data.report : result.data;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = caseId + '-' + version + '-report.json';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   return <>
     <header className="topbar">
@@ -133,17 +162,23 @@ function App() {
 
       <section className="workbench" aria-labelledby="workbench-title" aria-busy={Boolean(pending)}>
         <header className="bench-heading">
-          <div><h2 id="workbench-title">Library fee calculator</h2><p>Compare one return or sweep all 366 supported inputs.</p></div>
+          <div><h2 id="workbench-title">{migration?.title ?? "Loading migration cases…"}</h2><p>{migration && "Compare one input or sweep all " + (migration.maximum - migration.minimum + 1) + " supported inputs."}</p></div>
           <div className="switch" aria-label="Python port version">
-            <button type="button" aria-pressed={version === 'flawed'} disabled={Boolean(pending)} onClick={() => changeVersion('flawed')}>Initial port</button>
-            <button type="button" aria-pressed={version === 'corrected'} disabled={Boolean(pending)} onClick={() => changeVersion('corrected')}>Corrected port</button>
+            <button type="button" aria-pressed={version === 'flawed'} disabled={Boolean(pending) || !migration} onClick={() => changeVersion('flawed')}>Initial port</button>
+            <button type="button" aria-pressed={version === 'corrected'} disabled={Boolean(pending) || !migration} onClick={() => changeVersion('corrected')}>Corrected port</button>
           </div>
         </header>
+        {caseError && <p role="alert">{caseError}</p>}
+        <label className="case-select">Migration case
+          <select value={caseId} disabled={Boolean(pending) || !migration} onChange={event => changeCase(event.target.value)}>
+            {cases.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+          </select>
+        </label>
         <form className="controls" onSubmit={(event) => { event.preventDefault(); void run('compare'); }}>
-          <label>Days overdue<input type="number" required min="0" max="365" step="1" value={days}
-            disabled={Boolean(pending)} onChange={(event) => { setDays(event.target.value); setError(''); }} /></label>
-          <button className="primary" disabled={Boolean(pending)} type="submit">{pending === 'compare' ? 'Comparing…' : 'Compare'} <span aria-hidden="true">→</span></button>
-          <button className="outline sweep-button" disabled={Boolean(pending)} type="button" onClick={() => void run('sweep')}>{pending === 'sweep' ? 'Sweeping…' : 'Run boundary sweep'}</button>
+          <label>{migration?.inputLabel ?? "Input"}<input type="number" required min={migration?.minimum} max={migration?.maximum} step="1" value={days}
+            disabled={Boolean(pending) || !migration} onChange={(event) => { setDays(event.target.value); setError(''); }} /></label>
+          <button className="primary" disabled={Boolean(pending) || !migration} type="submit">{pending === 'compare' ? 'Comparing…' : 'Compare'} <span aria-hidden="true">→</span></button>
+          <button className="outline sweep-button" disabled={Boolean(pending) || !migration} type="button" onClick={() => void run('sweep')}>{pending === 'sweep' ? 'Sweeping…' : 'Run boundary sweep'}</button>
         </form>
         {error && <div className="callout mismatch" role="alert"><strong>Run failed.</strong> {error}</div>}
         <div className="panes">
@@ -160,28 +195,29 @@ function App() {
             <div className="pane-body">
               <div className="modern-label">Calculated fee</div>
               <div className="fee">{comparison ? formatFee(comparison.modernCents) : '—'}</div>
-              <div className="modern-label">{comparison ? displayedDays + ' days overdue' : 'Awaiting comparison'}</div>
+              <div className="modern-label">{comparison ? migration?.inputLabel + ' ' + displayedDays : 'Awaiting comparison'}</div>
             </div>
           </article>
         </div>
         <div aria-live="polite">
           {mismatch && <div className="callout mismatch">
-            <strong>{sweep ? 'First mismatch at day ' + displayedDays : 'Mismatch at day ' + displayedDays}</strong>
-            <span>{sweep ? sweep.mismatchCount + ' differences across ' + sweep.checkedCount + ' inputs.' : 'The grace period changes when fees begin, while the original bills from the due date.'}</span>
+            <strong>{sweep ? 'First mismatch at ' + migration.inputUnit + ' ' + displayedDays : 'Mismatch at ' + migration.inputUnit + ' ' + displayedDays}</strong>
+            <span>{sweep ? sweep.mismatchCount + (sweep.mismatchCount === 1 ? ' difference across ' : ' differences across ') + sweep.checkedCount + ' inputs.' : 'The port and the running legacy program returned different values.'}</span>
           </div>}
           {parity && <div className="callout match">
-            <strong>{sweep ? 'Parity verified across all ' + sweep.checkedCount + ' inputs' : 'Both programs agree at day ' + displayedDays}</strong>
-            {sweep && reference !== null && <button type="button" className="link-button" onClick={() => { setDays(String(reference)); void run('compare', version, String(reference)); }}>Replay day {reference} →</button>}
+            <strong>{sweep ? 'Parity verified across all ' + sweep.checkedCount + ' inputs' : 'Both programs agree at ' + migration.inputUnit + ' ' + displayedDays}</strong>
+            {sweep && reference !== null && <button type="button" className="link-button" onClick={() => { setDays(String(reference)); void run('compare', version, String(reference)); }}>Replay {migration?.inputUnit} {reference} →</button>}
           </div>}
         </div>
         {comparison && <details className="policy" open={Boolean(mismatch)}><summary>Legacy policy lines</summary>
           <pre>{comparison.policyLines.join('\n')}</pre>
         </details>}
-        {mismatch && <Evidence key={comparison.daysOverdue} result={comparison} />}
+        {mismatch && <Evidence key={caseId + comparison.daysOverdue} result={comparison} migration={migration} />}
+        {result && <div className="report-download"><button type="button" className="outline" onClick={downloadReport}>Download run report ↓</button><p>Includes the manifest, source hashes, checked range, actual outputs, and every mismatch.</p></div>}
       </section>
       <section className="how" id="how-it-works">
         <h2>How it works</h2>
-        <p>The terminal runs an original demonstration fixture in PC-BASIC. The sweep evaluates every whole day from 0 to 365 in order. The first difference gives you a concrete case to review before updating the Kiro spec and the port.</p>
+        <p>Both fictional demonstration programs run in PC-BASIC through the same generated batch driver. Each sweep evaluates every integer in the selected manifest’s declared domain in one interpreter process. The first difference gives you a concrete case to review before updating the Kiro spec and the port.</p>
       </section>
     </main>
     <footer className="shell footer">Behavior Time Machine <span>Independent Kiroween prototype</span></footer>

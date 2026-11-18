@@ -15,3 +15,12 @@
 - The corrected port shall waive fees through day three. Starting on day four it shall charge 25 cents per overdue day from the original due date, capped at 1,000 cents.
 - Given a return four days overdue, when the corrected calculator evaluates the return, it shall charge 100 cents.
 - When swept against the original fixture, the corrected port shall match all 366 supported inputs.
+
+## 4. Verify registered scalar migrations
+
+- The manifest shall declare sources, range, parser, and labels without expected outputs. Invalid manifests shall return an invalid_manifest error.
+- Compare and sweep shall share the same generated BASIC batch driver. A comparison shall execute a range containing one value.
+- Integer bounds shall describe at most 10,000 inputs within the supported GW-BASIC loop range.
+- The parser shall reject missing, extra, blank, fractional, or non-integer output lines.
+- The transit initial port shall differ exactly at age 65 over 0–100. The corrected port shall match all 101 inputs.
+- Each run report shall include the manifest, source and driver hashes, checked range, checked count, all observed comparisons, and every mismatch. Downloaded reports shall preserve these fields.
